@@ -940,11 +940,13 @@ class MainWindow(QMainWindow):
         self.canvas.cursor_position_changed.connect(self.on_cursor_position_changed)
         self.canvas.color_sampled.connect(self.tool_panel.set_color)
         self.canvas_scroll.zoom_changed.connect(self.update_status_bar)
-        
+        self.canvas.zoom_requested.connect(self.canvas_scroll.zoom_at_canvas_point)
+        self.canvas.crop_requested.connect(self.on_crop_requested)
+
         # Command history signals
         self.command_history.history_changed.connect(self.update_undo_redo_actions)
         
-        # Tool shortcuts (B, E, I, G)
+        # Tool shortcuts (B, E, I, G, R, Z, C)
         self._tool_shortcuts = [
             QShortcut(QKeySequence("B"), self, lambda: self.tool_panel.select_tool("brush")),
             QShortcut(QKeySequence("E"), self, lambda: self.tool_panel.select_tool("eraser")),
@@ -952,7 +954,23 @@ class MainWindow(QMainWindow):
             QShortcut(QKeySequence("I"), self, lambda: self.tool_panel.select_tool("eyedropper")),
             QShortcut(QKeySequence("G"), self, lambda: self.tool_panel.select_tool("paint_bucket")),
             QShortcut(QKeySequence("R"), self, lambda: self.tool_panel.select_tool("shape")),
+            QShortcut(QKeySequence("Z"), self, lambda: self.tool_panel.select_tool("zoom")),
+            QShortcut(QKeySequence("C"), self, lambda: self.tool_panel.select_tool("crop")),
         ]
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Cancel), self, self._cancel_crop_if_active)
+        # Palette shortcuts: Alt+1–9, Alt+0 (slot 10), Ctrl+Alt+1 (slot 11), Ctrl+Alt+2 (slot 12)
+        self._palette_shortcuts = []
+        for i in range(10):
+            key = str(i + 1) if i < 9 else "0"
+            self._palette_shortcuts.append(
+                QShortcut(QKeySequence("Alt+" + key), self, lambda idx=i: self.tool_panel.set_brush_from_palette_index(idx))
+            )
+        self._palette_shortcuts.append(
+            QShortcut(QKeySequence("Ctrl+Alt+1"), self, lambda: self.tool_panel.set_brush_from_palette_index(10))
+        )
+        self._palette_shortcuts.append(
+            QShortcut(QKeySequence("Ctrl+Alt+2"), self, lambda: self.tool_panel.set_brush_from_palette_index(11))
+        )
         
         # Apply default brush size from preferences
         default_brush = int(self.settings.value("default_brush_size", 10))
@@ -1766,58 +1784,8 @@ class MainWindow(QMainWindow):
         self.update_status_bar()
     
     def crop_image(self):
-        """Crop the canvas and all layers to a rectangle (dialog)."""
-        pw, ph = self.project.width, self.project.height
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Crop")
-        layout = QFormLayout(dialog)
-        left_spin = QSpinBox()
-        left_spin.setRange(0, max(0, pw - 1))
-        left_spin.setValue(0)
-        layout.addRow("Left:", left_spin)
-        top_spin = QSpinBox()
-        top_spin.setRange(0, max(0, ph - 1))
-        top_spin.setValue(0)
-        layout.addRow("Top:", top_spin)
-        width_spin = QSpinBox()
-        width_spin.setRange(1, pw)
-        width_spin.setValue(pw)
-        layout.addRow("Width:", width_spin)
-        height_spin = QSpinBox()
-        height_spin.setRange(1, ph)
-        height_spin.setValue(ph)
-        layout.addRow("Height:", height_spin)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
-        
-        def clamp_crop():
-            left_spin.setMaximum(max(0, pw - width_spin.value()))
-            top_spin.setMaximum(max(0, ph - height_spin.value()))
-            width_spin.setMaximum(pw - left_spin.value())
-            height_spin.setMaximum(ph - top_spin.value())
-        width_spin.valueChanged.connect(clamp_crop)
-        height_spin.valueChanged.connect(clamp_crop)
-        left_spin.valueChanged.connect(clamp_crop)
-        top_spin.valueChanged.connect(clamp_crop)
-        
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        left = left_spin.value()
-        top = top_spin.value()
-        w = width_spin.value()
-        h = height_spin.value()
-        if left + w > pw or top + h > ph or w < 1 or h < 1:
-            QMessageBox.warning(self, "Crop", "Crop region must be inside the canvas.")
-            return
-        if left == 0 and top == 0 and w == pw and h == ph:
-            return
-        command = CropProjectCommand(self.project, left, top, w, h)
-        self.command_history.execute(command)
-        self.modified = True
-        self.canvas.update_size()
-        self.update_status_bar()
+        """Switch to Crop tool so the user can drag a rectangle on the canvas (live preview)."""
+        self.tool_panel.select_tool("crop")
     
     def make_color_transparent(self):
         """Make pixels matching the chosen color transparent on the current layer."""
@@ -2074,15 +2042,42 @@ class MainWindow(QMainWindow):
     
     # Drawing operations
     
-    def on_drawing_completed(self, old_image, new_image, layer_index: int):
+    def _cancel_crop_if_active(self):
+        """On Escape: cancel crop drag if Crop tool is active and a rect is being drawn."""
+        if self.canvas.current_tool == "crop" and (
+            self.canvas.crop_start_point is not None or self.canvas._crop_preview_end is not None
+        ):
+            self.canvas.cancel_crop()
+
+    def on_crop_requested(self, left: int, top: int, width: int, height: int):
+        """Apply crop from canvas drag (live preview)."""
+        if width < 1 or height < 1:
+            return
+        pw, ph = self.project.width, self.project.height
+        if left == 0 and top == 0 and width == pw and height == ph:
+            return
+        command = CropProjectCommand(self.project, left, top, width, height)
+        self.command_history.execute(command)
+        self.modified = True
+        self.canvas.update_size()
+        self.layer_panel.refresh_layers()
+        self.update_status_bar()
+
+    def on_drawing_completed(self, old_image, new_image, layer_index: int, tool_name: str):
         """Handle drawing completion.
-        
+
         Args:
             old_image: Image before drawing
             new_image: Image after drawing
             layer_index: Index of layer that was drawn on
+            tool_name: Tool id (e.g. 'brush', 'eraser') for history display
         """
-        command = DrawCommand(self.project, layer_index, old_image, new_image)
+        if np.array_equal(np.array(old_image), np.array(new_image)):
+            return
+        display_name = DrawCommand.DISPLAY_NAMES.get(tool_name, "Draw")
+        command = DrawCommand(
+            self.project, layer_index, old_image, new_image, action_name=display_name
+        )
         self.command_history.execute(command)
         self.modified = True
     

@@ -10,10 +10,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QSlider, QListWidget, QListWidgetItem, QGroupBox, QSpinBox,
     QColorDialog, QCheckBox, QInputDialog, QFrame,
-    QMessageBox, QComboBox, QToolButton
+    QMessageBox, QComboBox, QToolButton, QToolTip,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush
+from typing import List, Optional
 
 
 def _make_tool_icon(name: str, size: int = 24) -> QIcon:
@@ -57,6 +58,13 @@ def _make_tool_icon(name: str, size: int = 24) -> QIcon:
         p.drawRect(cx - 5, cy - 5, 10, 10)
         p.drawLine(cx - 3, cy - 3, cx + 3, cy + 3)
         p.drawLine(cx + 3, cy - 3, cx - 3, cy + 3)
+    elif name == "zoom":
+        p.drawEllipse(cx - 6, cy - 6, 12, 12)
+        p.drawLine(cx + 3, cy + 3, cx + 7, cy + 7)
+        p.drawRect(cx + 5, cy + 5, 5, 5)
+    elif name == "crop":
+        p.drawRect(cx - 6, cy - 5, 12, 10)
+        p.drawLine(cx - 6, cy - 5, cx + 6, cy + 5)
     p.end()
     return QIcon(pix)
 
@@ -89,6 +97,14 @@ TOOL_INFO = {
         "Shapes (R)",
         "Draw shapes on the current layer. Choose Rectangle, Ellipse, etc. from the "
         "dropdown below, then click and drag on the canvas.",
+    ),
+    "zoom": (
+        "Zoom (Z)",
+        "Click to zoom in on an area. Shift+click to zoom out. Keeps the point under the cursor in view.",
+    ),
+    "crop": (
+        "Crop (C)",
+        "Drag a rectangle to set the crop region. Release to apply. Right-click or Escape to cancel.",
     ),
 }
 
@@ -485,6 +501,10 @@ class ToolOptionsPanel(QWidget):
                 self.eyedropper_btn = btn
             elif tool_id == "paint_bucket":
                 self.paint_bucket_btn = btn
+            elif tool_id == "zoom":
+                self.zoom_btn = btn
+            elif tool_id == "crop":
+                self.crop_btn = btn
             else:
                 self.shape_btn = btn
         tool_group.setLayout(tool_layout)
@@ -624,10 +644,10 @@ class ToolOptionsPanel(QWidget):
         color_group.setLayout(color_layout)
         tools_details_layout.addWidget(color_group)
         
-        # Color palette: swatches to quickly switch between colors
+        # Color palette: 12 fixed slots. Left-click = use color; Right-click = set slot to current.
         palette_group = QGroupBox("Palette")
         palette_layout = QVBoxLayout()
-        self.palette_colors = []  # list of QColor, max 12
+        self.palette_colors: List[Optional[QColor]] = [None] * 12
         self.palette_swatches = []
         swatch_row = QHBoxLayout()
         swatch_size = 24
@@ -636,14 +656,17 @@ class ToolOptionsPanel(QWidget):
             lbl.setFixedSize(swatch_size, swatch_size)
             lbl.setStyleSheet("background-color: #333; border: 1px solid #555; border-radius: 3px;")
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-            lbl.mousePressEvent = lambda e, idx=i: self._on_palette_swatch_clicked(idx)
+            lbl.setToolTip("Slot %d: Left-click = use color. Right-click = set to current. Alt+1–12 = use slot." % (i + 1))
+            lbl.mousePressEvent = lambda e, idx=i: self._on_palette_swatch_clicked(e, idx)
             self.palette_swatches.append(lbl)
             swatch_row.addWidget(lbl)
         palette_layout.addLayout(swatch_row)
-        add_palette_btn = QPushButton("Add current color")
-        add_palette_btn.setToolTip("Add the current color to the next palette slot")
-        add_palette_btn.clicked.connect(self._add_current_to_palette)
-        palette_layout.addWidget(add_palette_btn)
+        palette_hint = QLabel(
+            "Left-click: use color · Right-click: set slot to current · "
+            "Alt+1–0: slots 1–10 · Ctrl+Alt+1/2: slots 11–12"
+        )
+        palette_hint.setStyleSheet("font-size: 11px; color: #888;")
+        palette_layout.addWidget(palette_hint)
         palette_group.setLayout(palette_layout)
         tools_details_layout.addWidget(palette_group)
         
@@ -652,20 +675,31 @@ class ToolOptionsPanel(QWidget):
         
         layout.addStretch()
         
-        # Collapsed bar (shown when panel is collapsed)
+        # Collapsed state: a narrow "tab" that pops out so the user can always click to expand
+        self._tools_tab_width = 28
         self.tools_collapsed_bar = QWidget()
-        self.tools_collapsed_bar.setMaximumWidth(44)
+        self.tools_collapsed_bar.setFixedWidth(self._tools_tab_width)
+        self.tools_collapsed_bar.setStyleSheet(
+            "background-color: #404050; border: 1px solid #606070; border-left: none; "
+            "border-radius: 0 6px 6px 0;"
+        )
         bar_layout = QVBoxLayout(self.tools_collapsed_bar)
-        bar_layout.setContentsMargins(4, 4, 4, 4)
-        bar_label = QLabel("Tools")
-        bar_label.setStyleSheet("font-weight: bold; font-size: 11px;")
-        bar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bar_layout.addWidget(bar_label)
+        bar_layout.setContentsMargins(2, 8, 2, 8)
+        bar_layout.setSpacing(4)
         self.tools_expand_panel_btn = QPushButton(">>")
-        self.tools_expand_panel_btn.setToolTip("Expand panel")
+        self.tools_expand_panel_btn.setToolTip("Click to expand Tools panel")
+        self.tools_expand_panel_btn.setFixedSize(22, 36)
+        self.tools_expand_panel_btn.setStyleSheet(
+            "font-weight: bold; font-size: 12px; border: none; background: transparent;"
+        )
         self.tools_expand_panel_btn.clicked.connect(self._toggle_tools_panel_collapsed)
-        bar_layout.addWidget(self.tools_expand_panel_btn)
+        bar_layout.addWidget(self.tools_expand_panel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         bar_layout.addStretch()
+        tab_label = QLabel("Tools")
+        tab_label.setStyleSheet("font-size: 9px; color: #a0a0b0; border: none;")
+        tab_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tab_label.setWordWrap(True)
+        bar_layout.addWidget(tab_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.tools_collapsed_bar.hide()
         
         # Top-level: stacked or single layout with main + collapsed bar
@@ -678,7 +712,12 @@ class ToolOptionsPanel(QWidget):
         self._panel_collapsed = not self._panel_collapsed
         self.tools_main_widget.setVisible(not self._panel_collapsed)
         self.tools_collapsed_bar.setVisible(self._panel_collapsed)
-        self.setMaximumWidth(44 if self._panel_collapsed else 500)
+        if self._panel_collapsed:
+            self.setMinimumWidth(self._tools_tab_width)
+            self.setMaximumWidth(self._tools_tab_width)
+        else:
+            self.setMinimumWidth(200)
+            self.setMaximumWidth(500)
     
     def _toggle_tools_expanded(self):
         self._tools_expanded = not self._tools_expanded
@@ -710,28 +749,64 @@ class ToolOptionsPanel(QWidget):
             self.eraser_color_display.setStyleSheet(f"background-color: {c.name()}; border: 1px solid black;")
             self.eraser_color_changed.emit(c)
     
-    def _on_palette_swatch_clicked(self, index: int):
-        """Set current color to the palette swatch at index (if it has a color)."""
-        if 0 <= index < len(self.palette_colors):
+    def _on_palette_swatch_clicked(self, event, index: int):
+        """Left-click: use palette color. Right-click: set slot to current color."""
+        try:
+            if event is None or index < 0 or index >= 12:
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                if not self.current_color.isValid():
+                    return
+                new_rgb = self.current_color.rgb()
+                for j in range(12):
+                    if j != index and self.palette_colors[j] is not None:
+                        oc = self.palette_colors[j]
+                        if oc.isValid() and oc.rgb() == new_rgb:
+                            w = self.palette_swatches[index]
+                            QToolTip.showText(
+                                w.mapToGlobal(w.rect().center()),
+                                "Color already in palette",
+                                w,
+                                2000,
+                            )
+                            return
+                self.palette_colors[index] = QColor(self.current_color)
+                self._refresh_palette_swatches()
+                return
+            if event.button() != Qt.MouseButton.LeftButton:
+                return
             c = self.palette_colors[index]
-            self.current_color = c
-            self.color_display.setStyleSheet(f"background-color: {c.name()}; border: 1px solid black;")
-            self.color_changed.emit(c)
-    
-    def _add_current_to_palette(self):
-        """Add the current color to the next palette slot (max 12)."""
-        if len(self.palette_colors) >= 12:
-            self.palette_colors.pop(0)
-        self.palette_colors.append(QColor(self.current_color))
-        self._refresh_palette_swatches()
-    
+            if c is not None and c.isValid():
+                self.current_color = QColor(c)
+                self.color_display.setStyleSheet(
+                    "background-color: %s; border: 1px solid black;" % self.current_color.name()
+                )
+                self.color_changed.emit(self.current_color)
+        except Exception:
+            pass
+
+    def set_brush_from_palette_index(self, index: int):
+        """Set current brush color from palette slot (0–11). Used by Alt+1–12 shortcuts."""
+        try:
+            if 0 <= index < 12:
+                c = self.palette_colors[index]
+                if c is not None and c.isValid():
+                    self.current_color = QColor(c)
+                    self.color_display.setStyleSheet(
+                        "background-color: %s; border: 1px solid black;"
+                        % self.current_color.name()
+                    )
+                    self.color_changed.emit(self.current_color)
+        except Exception:
+            pass
+
     def _refresh_palette_swatches(self):
         """Update swatch labels to show palette colors."""
         for i in range(12):
-            if i < len(self.palette_colors):
-                c = self.palette_colors[i]
+            c = self.palette_colors[i]
+            if c is not None and c.isValid():
                 self.palette_swatches[i].setStyleSheet(
-                    f"background-color: {c.name()}; border: 1px solid #555; border-radius: 3px;"
+                    "background-color: %s; border: 1px solid #555; border-radius: 3px;" % c.name()
                 )
             else:
                 self.palette_swatches[i].setStyleSheet(
@@ -761,6 +836,8 @@ class ToolOptionsPanel(QWidget):
         self.eyedropper_btn.setChecked(tool == "eyedropper")
         self.paint_bucket_btn.setChecked(tool == "paint_bucket")
         self.shape_btn.setChecked(tool == "shape")
+        self.zoom_btn.setChecked(tool == "zoom")
+        self.crop_btn.setChecked(tool == "crop")
         self.paint_bucket_tolerance_widget.setVisible(tool == "paint_bucket")
         self.eraser_color_widget.setVisible(False)  # Eraser has no color option; it just erases
         self.shape_options_widget.setVisible(tool == "shape")
@@ -793,18 +870,73 @@ class ToolOptionsPanel(QWidget):
         self.brush_opacity_label.setText(f"{value}%")
         self.brush_opacity_changed.emit(value)
     
+    def _set_standard_colors_rainbow(self):
+        """Set the color dialog standard colors (6x8 grid) in rainbow order with basics and variants.
+        Row 0: red, orange, yellow, green, cyan, blue, purple, pink.
+        Row 1: darker variants. Row 2: lighter variants. Row 3: medium (brown, navy, etc).
+        Row 4: more hues. Row 5: white, grays, black.
+        """
+        # 48 colors: (r, g, b) – standard grid is 6 rows x 8 columns
+        colors_rgb = [
+            # Row 0 – vivid spectrum (left to right)
+            (255, 0, 0), (255, 128, 0), (255, 255, 0), (0, 255, 0), (0, 255, 255),
+            (0, 0, 255), (128, 0, 255), (255, 0, 255),
+            # Row 1 – darker
+            (180, 0, 0), (200, 80, 0), (180, 180, 0), (0, 160, 0), (0, 160, 160),
+            (0, 0, 180), (80, 0, 160), (180, 0, 160),
+            # Row 2 – lighter / pastel
+            (255, 180, 180), (255, 210, 170), (255, 255, 180), (180, 255, 180),
+            (180, 255, 255), (180, 200, 255), (210, 180, 255), (255, 180, 230),
+            # Row 3 – medium (brown, navy, violet, etc.)
+            (139, 0, 0), (160, 80, 40), (200, 150, 0), (34, 139, 34),
+            (0, 128, 128), (0, 0, 128), (75, 0, 130), (200, 0, 128),
+            # Row 4 – more distinct
+            (128, 0, 0), (180, 90, 30), (210, 180, 140), (50, 205, 50),
+            (0, 206, 209), (65, 105, 225), (138, 43, 226), (255, 105, 180),
+            # Row 5 – neutrals: white → black
+            (255, 255, 255), (220, 220, 220), (192, 192, 192), (128, 128, 128),
+            (80, 80, 80), (50, 50, 50), (0, 0, 0), (101, 67, 33),
+        ]
+        for i, (r, g, b) in enumerate(colors_rgb):
+            if i >= 48:
+                break
+            QColorDialog.setStandardColor(i, QColor(r, g, b))
+
+    def _set_rainbow_custom_colors(self):
+        """Set the color dialog custom colors to rainbow order: red top-left, down to black."""
+        n = QColorDialog.customCount()
+        for i in range(min(16, n)):
+            if i < 8:
+                hue = (i * 45) % 360
+                c = QColor.fromHsv(hue, 255, 255)
+            elif i < 15:
+                hue = ((i - 8) * 45) % 360
+                val = 255 - (i - 7) * 32
+                val = max(0, min(255, val))
+                c = QColor.fromHsv(hue, 255, val)
+            else:
+                c = QColor(0, 0, 0)
+            QColorDialog.setCustomColor(i, c)
+
     def choose_color(self):
-        """Open color picker dialog."""
-        color = QColorDialog.getColor(self.current_color, self, "Choose Color")
+        """Open color picker with standard colors in rainbow order and custom colors."""
+        self._set_standard_colors_rainbow()
+        self._set_rainbow_custom_colors()
+        opts = QColorDialog.ColorDialogOption.DontUseNativeDialog
+        color = QColorDialog.getColor(
+            self.current_color, self, "Choose Color", opts
+        )
         if color.isValid():
             self.current_color = color
-            self.color_display.setStyleSheet(f"background-color: {color.name()}; border: 1px solid black;")
+            self.color_display.setStyleSheet(
+                "background-color: %s; border: 1px solid black;" % color.name()
+            )
             self.color_changed.emit(color)
 
 
 class HistoryPanel(QWidget):
-    """Panel showing undo history (list of command names)."""
-    
+    """Panel showing undo/redo history so the user can see what was done and what was undone."""
+
     def __init__(self, command_history, parent=None):
         super().__init__(parent)
         self.command_history = command_history
@@ -813,16 +945,35 @@ class HistoryPanel(QWidget):
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
         self.history_list = QListWidget()
-        self.history_list.setToolTip("List of undo steps (most recent at top)")
+        self.history_list.setToolTip(
+            "Done = applied (can undo). Undone = reverted (can redo). Most recent at top."
+        )
         layout.addWidget(self.history_list)
         self.refresh()
         try:
             self.command_history.history_changed.connect(self.refresh)
         except Exception:
             pass
-    
+
     def refresh(self):
-        """Rebuild list from undo stack (newest first)."""
+        """Rebuild list: Done (undo stack, newest first), then Undone (redo stack, next redo first)."""
         self.history_list.clear()
-        for cmd in reversed(self.command_history.undo_stack):
-            self.history_list.addItem(cmd.get_name())
+        u = self.command_history.undo_stack
+        r = self.command_history.redo_stack
+        if not u and not r:
+            self.history_list.addItem("(no actions yet)")
+            return
+        # Section: Done (applied, can undo) – newest at top
+        done_header = QListWidgetItem("Done (can undo)")
+        done_header.setForeground(QBrush(QColor(160, 220, 160)))
+        self.history_list.addItem(done_header)
+        for cmd in reversed(u):
+            self.history_list.addItem("  " + cmd.get_name())
+        # Section: Undone (can redo) – next redo at top
+        if r:
+            self.history_list.addItem("")
+            redo_header = QListWidgetItem("Undone (can redo)")
+            redo_header.setForeground(QBrush(QColor(220, 200, 140)))
+            self.history_list.addItem(redo_header)
+            for cmd in reversed(r):
+                self.history_list.addItem("  \u2933 " + cmd.get_name())

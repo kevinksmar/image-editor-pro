@@ -39,38 +39,55 @@ class Command(ABC):
 
 
 class DrawCommand(Command):
-    """Command for drawing operations (brush, eraser)."""
-    
-    def __init__(self, project, layer_index: int, old_image: Image.Image, new_image: Image.Image):
+    """Command for drawing operations (brush, eraser, transparency, shape, etc.)."""
+
+    DISPLAY_NAMES = {
+        "brush": "Brush",
+        "eraser": "Eraser",
+        "transparency": "Transparency",
+        "shape": "Shape",
+        "paint_bucket": "Paint bucket",
+    }
+
+    def __init__(
+        self,
+        project,
+        layer_index: int,
+        old_image: Image.Image,
+        new_image: Image.Image,
+        action_name: Optional[str] = None,
+    ):
         """Initialize draw command.
-        
+
         Args:
             project: Project instance
             layer_index: Index of layer being drawn on
             old_image: Layer image before drawing
             new_image: Layer image after drawing
+            action_name: Display name for history (e.g. 'Brush', 'Eraser'). If None, uses 'Draw'.
         """
         self.project = project
         self.layer_index = layer_index
         self.old_image = old_image.copy()
         self.new_image = new_image.copy()
-    
+        self.action_name = action_name if action_name else "Draw"
+
     def execute(self):
         """Apply the drawing."""
         layer = self.project.get_layer(self.layer_index)
         if layer:
             layer.image = self.new_image.copy()
             self.project.layer_modified.emit(self.layer_index)
-    
+
     def undo(self):
         """Revert the drawing."""
         layer = self.project.get_layer(self.layer_index)
         if layer:
             layer.image = self.old_image.copy()
             self.project.layer_modified.emit(self.layer_index)
-    
+
     def get_name(self) -> str:
-        return "Draw"
+        return self.action_name
 
 
 class AddLayerCommand(Command):

@@ -22,9 +22,11 @@ class Canvas(QWidget):
         drawing_completed: Emitted when a drawing stroke is completed
     """
     
-    drawing_completed = pyqtSignal(object, object, int)  # old_image, new_image, layer_index
+    drawing_completed = pyqtSignal(object, object, int, str)  # old_image, new_image, layer_index, tool_name
     cursor_position_changed = pyqtSignal(int, int)  # canvas x, y (-1,-1 when left)
     color_sampled = pyqtSignal(QColor)
+    zoom_requested = pyqtSignal(int, int, bool)  # canvas_x, canvas_y, zoom_in
+    crop_requested = pyqtSignal(int, int, int, int)  # left, top, width, height
     
     def __init__(self, project, parent=None):
         """Initialize the canvas.
@@ -62,7 +64,10 @@ class Canvas(QWidget):
         # Shape tools: start point of drag and current drag point (for preview)
         self.shape_start_point = None
         self._shape_preview_end = None
-        
+        # Crop tool: drag rect (canvas coords); live preview in paintEvent
+        self.crop_start_point = None
+        self._crop_preview_end = None
+
         # How to show transparency: "checkerboard", "white", "gray", "black"
         self.transparency_display = "checkerboard"
         
@@ -95,6 +100,14 @@ class Canvas(QWidget):
         """Handle project changes."""
         self.update()
     
+    def cancel_crop(self):
+        """Clear crop drag preview (e.g. on Escape)."""
+        if self.crop_start_point or self._crop_preview_end:
+            self.crop_start_point = None
+            self._crop_preview_end = None
+            self.is_drawing = False
+            self.update()
+
     def set_zoom(self, zoom_level: float):
         """Set zoom level.
         
@@ -210,7 +223,11 @@ class Canvas(QWidget):
             
             # Draw the image (shape preview is the layer itself—we draw on the layer during drag)
             painter.drawPixmap(0, 0, pixmap)
-            
+
+            # Crop tool: dim area outside the crop rect, draw border
+            if self.crop_start_point and self._crop_preview_end:
+                self._draw_crop_overlay(painter, width, height)
+
             # Eyedropper zoom bubble: zoomed pixel view next to cursor
             if self.current_tool == "eyedropper" and self._picker_cursor_wx >= 0 and self._picker_cursor_wy >= 0:
                 self._draw_eyedropper_bubble(painter, rendered_image, width, height)
@@ -270,6 +287,17 @@ class Canvas(QWidget):
             p.setBrush(QBrush(Qt.GlobalColor.transparent))
             p.drawLine(hot - 8, hot, hot + 8, hot)
             p.drawLine(hot, hot - 8, hot, hot + 8)
+        elif self.current_tool == "zoom":
+            p.setPen(QPen(QColor(220, 220, 220), 2))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.drawEllipse(hot - 10, hot - 10, 20, 20)
+            p.drawLine(hot + 6, hot + 6, hot + 14, hot + 14)
+            p.drawRect(hot + 10, hot + 10, 8, 8)
+        elif self.current_tool == "crop":
+            p.setPen(QPen(QColor(220, 220, 220), 2))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.drawRect(hot - 10, hot - 8, 20, 16)
+            p.drawLine(hot - 10, hot - 8, hot + 10, hot + 8)
         else:
             # eyedropper / default: cross
             p.setPen(QPen(QColor(220, 220, 220), 2))
@@ -347,7 +375,38 @@ class Canvas(QWidget):
         painter.setPen(QPen(QColor(0, 0, 0), 1))
         painter.drawLine(int(center_x - cross - 1), int(center_y), int(center_x + cross + 1), int(center_y))
         painter.drawLine(int(center_x), int(center_y - cross - 1), int(center_x), int(center_y + cross + 1))
-    
+
+    def _draw_crop_overlay(self, painter: QPainter, canvas_w: int, canvas_h: int):
+        """Draw crop preview: dim outside the rect, border inside."""
+        x1, y1 = self.crop_start_point.x(), self.crop_start_point.y()
+        x2, y2 = self._crop_preview_end.x(), self._crop_preview_end.y()
+        left = min(x1, x2)
+        right = max(x1, x2)
+        top = min(y1, y2)
+        bottom = max(y1, y2)
+        left = max(0, min(left, self.project.width - 1))
+        right = max(0, min(right, self.project.width))
+        top = max(0, min(top, self.project.height - 1))
+        bottom = max(0, min(bottom, self.project.height))
+        if right <= left or bottom <= top:
+            return
+        # Widget coords (scaled)
+        z = self.zoom_level
+        lw, tw = int(left * z), int(top * z)
+        rw, bw = int(right * z), int(bottom * z)
+        # Dim outside: four rectangles
+        dim = QColor(0, 0, 0, 140)
+        painter.fillRect(0, 0, canvas_w, tw, dim)
+        painter.fillRect(0, bw, canvas_w, canvas_h - bw, dim)
+        painter.fillRect(0, tw, lw, bw - tw, dim)
+        painter.fillRect(rw, tw, canvas_w - rw, bw - tw, dim)
+        # Border
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.setBrush(QBrush(Qt.GlobalColor.transparent))
+        painter.drawRect(lw, tw, rw - lw, bw - tw)
+        painter.setPen(QPen(QColor(0, 150, 255), 1))
+        painter.drawRect(lw, tw, rw - lw, bw - tw)
+
     def mousePressEvent(self, event):
         """Handle mouse press."""
         if event.button() != Qt.MouseButton.LeftButton:
@@ -355,7 +414,19 @@ class Canvas(QWidget):
         pt = self._get_canvas_point(event.position().toPoint())
         # Emit cursor position
         self.cursor_position_changed.emit(pt.x(), pt.y())
-        
+
+        if self.current_tool == "zoom":
+            zoom_in = not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            self.zoom_requested.emit(pt.x(), pt.y(), zoom_in)
+            return
+
+        if self.current_tool == "crop":
+            self.crop_start_point = pt
+            self._crop_preview_end = pt
+            self.is_drawing = True
+            self.update()
+            return
+
         if self.current_tool == "eyedropper":
             self._sample_color(pt.x(), pt.y())
             return
@@ -368,7 +439,9 @@ class Canvas(QWidget):
                 if new_image is not None:
                     active_layer.image = new_image
                     self.project.layer_modified.emit(self.active_layer_index)
-                    self.drawing_completed.emit(old_image, new_image, self.active_layer_index)
+                    self.drawing_completed.emit(
+                        old_image, new_image, self.active_layer_index, self.current_tool
+                    )
                 return
         
         if self.current_tool == "transparency":
@@ -416,7 +489,11 @@ class Canvas(QWidget):
             self._brush_cursor_wy = -1
             if self.current_tool == "shape":
                 self.update()
-        
+            if self.current_tool == "crop":
+                self._crop_preview_end = pt
+                self.update()
+                return
+
         if self.is_drawing and self.shape_start_point and self.current_tool == "shape":
             self._shape_preview_end = pt
             active_layer = self.project.get_layer(self.active_layer_index)
@@ -452,6 +529,8 @@ class Canvas(QWidget):
                 self.is_drawing = False
                 self.shape_start_point = None
                 self._shape_preview_end = None
+                self.crop_start_point = None
+                self._crop_preview_end = None
                 self.last_point = None
                 active_layer = self.project.get_layer(self.active_layer_index)
                 if active_layer and self.image_before_draw:
@@ -459,11 +538,31 @@ class Canvas(QWidget):
                     self.project.layer_modified.emit(self.active_layer_index)
                 self.image_before_draw = None
                 self._eraser_composite_below = None
+                self.update()
             return
         if not self.is_drawing:
             return
         pt = self._get_canvas_point(event.position().toPoint())
         active_layer = self.project.get_layer(self.active_layer_index)
+
+        # Crop: commit rect (left, top, width, height)
+        if self.current_tool == "crop" and self.crop_start_point and self._crop_preview_end:
+            x1, y1 = self.crop_start_point.x(), self.crop_start_point.y()
+            x2, y2 = self._crop_preview_end.x(), self._crop_preview_end.y()
+            left = max(0, min(x1, x2))
+            top = max(0, min(y1, y2))
+            right = max(0, min(max(x1, x2), self.project.width))
+            bottom = max(0, min(max(y1, y2), self.project.height))
+            w = right - left
+            h = bottom - top
+            self.crop_start_point = None
+            self._crop_preview_end = None
+            self.is_drawing = False
+            self.update()
+            if w >= 1 and h >= 1 and (w < self.project.width or h < self.project.height):
+                self.crop_requested.emit(left, top, w, h)
+            return
+
         if self.shape_start_point and active_layer and self.image_before_draw and self.current_tool == "shape":
             # Preview was the layer itself; commit using last drag point so no shift
             end_pt = self._shape_preview_end if self._shape_preview_end is not None else pt
@@ -472,7 +571,8 @@ class Canvas(QWidget):
             self.drawing_completed.emit(
                 self.image_before_draw,
                 active_layer.image.copy(),
-                self.active_layer_index
+                self.active_layer_index,
+                self.current_tool,
             )
             self.shape_start_point = None
             self._shape_preview_end = None
@@ -480,7 +580,8 @@ class Canvas(QWidget):
             self.drawing_completed.emit(
                 self.image_before_draw,
                 active_layer.image.copy(),
-                self.active_layer_index
+                self.active_layer_index,
+                self.current_tool,
             )
         self.is_drawing = False
         self.image_before_draw = None
@@ -733,3 +834,19 @@ class CanvasScrollArea(QScrollArea):
     def zoom_actual_size(self):
         """Same as zoom_reset (100%)."""
         self.zoom_reset()
+
+    def zoom_at_canvas_point(self, canvas_x: int, canvas_y: int, zoom_in: bool):
+        """Zoom in or out centered on a canvas point, then scroll so that point stays under the cursor."""
+        factor = 1.2 if zoom_in else 1.0 / 1.2
+        new_zoom = max(0.1, min(10.0, self.canvas.zoom_level * factor))
+        self.canvas.set_zoom(new_zoom)
+        # Scroll so (canvas_x, canvas_y) stays roughly centered in viewport
+        vp = self.viewport()
+        if vp and vp.width() > 0 and vp.height() > 0:
+            cx = int(canvas_x * new_zoom)
+            cy = int(canvas_y * new_zoom)
+            h_bar = self.horizontalScrollBar()
+            v_bar = self.verticalScrollBar()
+            h_bar.setValue(cx - vp.width() // 2)
+            v_bar.setValue(cy - vp.height() // 2)
+        self.zoom_changed.emit()
