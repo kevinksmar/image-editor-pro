@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 
+
 def main():
     root = os.path.dirname(os.path.abspath(__file__))
     os.chdir(root)
@@ -49,6 +50,7 @@ def main():
     print("Running:", " ".join(cmd))
     result = subprocess.run(cmd)
     sys.exit(result.returncode)
+
 
 if __name__ == "__main__":
     main()

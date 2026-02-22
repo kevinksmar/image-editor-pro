@@ -9,7 +9,7 @@ This module provides:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QSlider, QListWidget, QListWidgetItem, QGroupBox, QSpinBox,
-    QColorDialog, QCheckBox, QInputDialog, QSizePolicy, QFrame,
+    QColorDialog, QCheckBox, QInputDialog, QFrame,
     QMessageBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -81,11 +81,13 @@ TOOL_INFO = {
     ),
     "paint_bucket": (
         "Paint Bucket (G)",
-        "Click to fill a contiguous area of similar color on the current layer. Use tolerance to control how similar colors must be.",
+        "Click to fill a contiguous area of similar color on the current layer. "
+        "Use tolerance to control how similar colors must be.",
     ),
     "shape": (
         "Shapes (R)",
-        "Draw shapes on the current layer. Choose Rectangle, Ellipse, etc. from the dropdown below, then click and drag on the canvas.",
+        "Draw shapes on the current layer. Choose Rectangle, Ellipse, etc. from the "
+        "dropdown below, then click and drag on the canvas.",
     ),
 }
 

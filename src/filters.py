@@ -9,7 +9,6 @@ This module provides various image processing filters:
 
 from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
-from typing import Tuple
 
 
 class Filters:
@@ -269,7 +268,9 @@ class Filters:
         return out.convert(image.mode)
     
     @staticmethod
-    def make_color_transparent(image: Image.Image, target_r: int, target_g: int, target_b: int, tolerance: int = 30) -> Image.Image:
+    def make_color_transparent(
+        image: Image.Image, target_r: int, target_g: int, target_b: int, tolerance: int = 30
+    ) -> Image.Image:
         """Make pixels matching the target color (within tolerance) transparent.
         
         Args:

@@ -3,7 +3,7 @@
 Runs filter processing in a QThread so the UI stays responsive.
 """
 
-from PyQt6.QtCore import QObject, pyqtSignal, QMutex, QMutexLocker
+from PyQt6.QtCore import QObject, pyqtSignal
 from PIL import Image
 
 # Lazy import to avoid circular imports; filters are used only in worker thread

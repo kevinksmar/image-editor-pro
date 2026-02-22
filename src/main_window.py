@@ -5,13 +5,13 @@ This module provides the main application window with all UI components.
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDockWidget,
-    QMenuBar, QMenu, QToolBar, QFileDialog, QMessageBox, QInputDialog,
-    QDialog, QLabel, QSlider, QDialogButtonBox, QSpinBox, QFormLayout,
+    QToolBar, QFileDialog, QMessageBox, QInputDialog,
+    QDialog, QLabel, QDialogButtonBox, QSpinBox, QFormLayout,
     QStatusBar, QColorDialog, QApplication, QComboBox, QStyle,
     QLineEdit, QPushButton, QProgressDialog
 )
 from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QAction, QKeySequence, QIcon, QColor, QImage, QPixmap, QShortcut
+from PyQt6.QtGui import QAction, QKeySequence, QColor, QImage, QPixmap, QShortcut
 from PIL import Image, ImageDraw, ImageFont
 import os
 import io
@@ -218,8 +218,10 @@ class FilterDialog(QDialog):
     
     def _connect_preview(self):
         """Connect all parameter controls to _update_preview."""
-        for name in ["radius_spinbox", "factor_spinbox", "bits_spinbox",
-                    "hue_spinbox", "saturation_spinbox"]:
+        for name in [
+            "radius_spinbox", "factor_spinbox", "bits_spinbox",
+            "hue_spinbox", "saturation_spinbox",
+        ]:
             w = getattr(self, name, None)
             if w is not None:
                 w.valueChanged.connect(self._update_preview)
@@ -561,7 +563,9 @@ class MainWindow(QMainWindow):
         filter_menu = menubar.addMenu("F&ilter")
         
         self.undo_last_filter_action = QAction("Undo last filter", self)
-        self.undo_last_filter_action.setToolTip("Revert the last change (e.g. undo Blur, Brightness, etc.). Same as Edit > Undo (Ctrl+Z).")
+        self.undo_last_filter_action.setToolTip(
+            "Revert the last change (e.g. undo Blur, Brightness, etc.). Same as Edit > Undo (Ctrl+Z)."
+        )
         self.undo_last_filter_action.triggered.connect(self.command_history.undo)
         self.undo_last_filter_action.setEnabled(False)
         filter_menu.addAction(self.undo_last_filter_action)
@@ -1333,12 +1337,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "File not found.")
         except PermissionError:
             QMessageBox.critical(self, "Error", "Permission denied. Cannot read that file.")
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             QMessageBox.critical(
                 self, "Error",
                 "The project file is corrupted or not a valid .iep file."
             )
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError):
             QMessageBox.critical(
                 self, "Error",
                 "The project file has an invalid structure and cannot be opened."

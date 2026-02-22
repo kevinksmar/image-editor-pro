@@ -6,7 +6,7 @@ This module provides the main canvas where users can view and edit images.
 import numpy as np
 from PIL import Image, ImageDraw
 from PyQt6.QtWidgets import QWidget, QScrollArea
-from PyQt6.QtCore import Qt, QPoint, QPointF, pyqtSignal, QRect
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect
 from PyQt6.QtGui import QPainter, QPixmap, QImage, QPen, QColor, QCursor, QWheelEvent, QBrush
 
 
@@ -221,7 +221,6 @@ class Canvas(QWidget):
         """Draw a zoom bubble next to the cursor showing pixels for precise eyedropper picking."""
         bubble_size = 96
         source_size = 11
-        zoom_factor = bubble_size / source_size
         cx = int(self._picker_cursor_wx / self.zoom_level)
         cy = int(self._picker_cursor_wy / self.zoom_level)
         half = source_size // 2
