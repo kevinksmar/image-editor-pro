@@ -11,18 +11,41 @@ A professional desktop image editing application built with Python and PyQt6. Im
 
 ## Feature Demo
 
-<!-- Add a short GIF or video showing the app in action (e.g. layers, filters, drawing). -->
-<!-- Example: ![Feature Demo](docs/demo.gif) -->
-*Placeholder: Add a "Feature Demo" GIF or short video here to showcase the app.*
+A short demo helps viewers see the app in action. Add a GIF or short video here once you have one.
+
+<!-- Replace the placeholder below with your demo asset (e.g. docs/demo.gif or a link to a short video). -->
+<p align="center">
+  <img src="docs/demo.gif" alt="Image Editor Pro – Feature Demo" width="720" />
+</p>
+<p align="center">
+  <em>Quick demo: layers, drawing tools, and filters in action.</em>
+</p>
+
+**Tips:** Record with a tool like [ScreenToGif](https://www.screentogif.com/) or [LICEcap](https://www.cockos.com/licecap/). Keep it under 15 seconds and show: creating a layer, brushing, applying a filter, and zoom/pan.
+
+---
 
 ## Screenshots
 
-<!-- Add screenshots of the main interface, layer panel, and filters. -->
-| Main interface | Layers & tools | Filters |
-|----------------|----------------|---------|
-| *Screenshot 1* | *Screenshot 2* | *Screenshot 3* |
+The UI uses a **modern dark theme**, **dockable panels**, and a **central canvas**. Use the grid below to showcase your screenshots.
 
-*Placeholder: Replace with actual screenshots (e.g. `docs/screenshot-main.png`).*
+### Main interface (dark mode + canvas)
+
+| | |
+|:---:|:---:|
+| **Dark theme & canvas** | **Dockable panels** |
+| ![Main window – dark mode and central canvas](docs/screenshots/main-dark-canvas.png) | ![Layers and Tools panels docked](docs/screenshots/panels-docked.png) |
+| Dark mode (charcoal grays, blue accents), menu bar, toolbar, and central canvas with zoom. | Layers panel (left) and Tools panel (right) can be docked, floated, or hidden. |
+
+### Panels and workflow
+
+| | |
+|:---:|:---:|
+| **Layers panel** | **Filter dialog** |
+| ![Layers list with thumbnails and opacity](docs/screenshots/layers-panel.png) | ![Filter dialog with live preview](docs/screenshots/filter-dialog.png) |
+| Layer list with thumbnails, visibility toggles, opacity sliders, and add/remove. | Parametric filters (e.g. Blur, Brightness) with live preview and sliders. |
+
+**How to add your images:** Place files in `docs/screenshots/` with the names above (e.g. `main-dark-canvas.png`, `panels-docked.png`, `layers-panel.png`, `filter-dialog.png`). If you use different names, update the paths in this table.
 
 ---
 
@@ -353,18 +376,31 @@ pytest tests/ -v
 - Undo history is limited to 50 operations by default
 - Some filters may take time on large layers
 
+## 🗺️ Roadmap
+
+Planned **advanced** features to make Image Editor Pro even more competitive with professional tools:
+
+| Feature | Description | Status |
+|--------|-------------|--------|
+| **AI upscaling** | Enhance resolution using a local or API-based model (e.g. Real-ESRGAN-style) for high-quality upscaling. | 🔜 Coming soon |
+| **Layer masks** | Non-destructive masking per layer with brush/gradient for compositing and effects. | 🔜 Coming soon |
+| **SVG export** | Export vector paths and shapes to SVG in addition to raster PNG/JPEG. | 🔜 Coming soon |
+| **Non-destructive adjustment layers** | Apply brightness, contrast, etc. as reusable layers that can be edited or toggled without baking pixels. | 🔜 Coming soon |
+| **Plugin / extension API** | Allow third-party filters and tools via a simple Python plugin API. | 🔜 Coming soon |
+
+This roadmap shows long-term direction; implementation order may change based on feedback and contribution.
+
+---
+
 ## 🔮 Future Enhancements
 
 - [ ] Selection tools (rectangular, elliptical, lasso)
 - [ ] Text tool
 - [ ] Shape tools (rectangle, circle, line)
-- [ ] Layer masks
-- [ ] Adjustment layers
 - [ ] More filters (gaussian blur, motion blur, etc.)
 - [ ] Brush presets
 - [ ] History panel
 - [ ] Export templates
-- [ ] Plugin system
 
 ## 📝 License
 
@@ -383,19 +419,8 @@ If you have questions, suggestions, or issues:
 - Check the documentation in the `docs/` folder
 - Read the inline code documentation
 
-## 🌟 Screenshots
-
-### Main Interface
-The main window features a central canvas, dockable panels for layers and tools, and a comprehensive menu system.
-
-### Layer Management
-The Layers panel allows you to manage multiple layers, adjust opacity, toggle visibility, and reorder layers with ease.
-
-### Drawing Tools
-Choose between brush and eraser tools, adjust size and opacity, and select colors with the built-in color picker.
-
-### Filters
-Apply professional-grade filters including blur, sharpen, brightness/contrast adjustments, and more.
+- **Contributors:** See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for architecture (MVC, Command pattern), data flow, and how to add filters or tools.  
+- **Releases:** [v1.0.0 release notes](docs/RELEASE_v1.0.0.md) (build system, CI/CD, dark theme, logging).
 
 ---
 

@@ -48,6 +48,7 @@ class Canvas(QWidget):
         self.current_tool = "brush"  # brush, eraser, transparency, eyedropper, paint_bucket, shape
         self.shape_kind = "rectangle"
         self.shape_style = "filled"  # filled, outline, transparent_fill, transparent_outline
+        self.shape_outline_width = 2  # border/outline thickness for shapes (1–50)
         self.brush_size = 10
         self.brush_opacity = 100
         self.brush_color = QColor(0, 0, 0, 255)
@@ -56,8 +57,11 @@ class Canvas(QWidget):
         
         # Store image before drawing for undo
         self.image_before_draw = None
-        # Shape tools: start point of drag
+        # Eraser: composite of layers below current (cached for the stroke so erase is stable)
+        self._eraser_composite_below = None
+        # Shape tools: start point of drag and current drag point (for preview)
         self.shape_start_point = None
+        self._shape_preview_end = None
         
         # How to show transparency: "checkerboard", "white", "gray", "black"
         self.transparency_display = "checkerboard"
@@ -65,10 +69,14 @@ class Canvas(QWidget):
         # Eyedropper zoom bubble: cursor position in widget coords (-1 when not over canvas)
         self._picker_cursor_wx = -1
         self._picker_cursor_wy = -1
+        # Brush/eraser/transparency: cursor in widget coords for tool preview circle
+        self._brush_cursor_wx = -1
+        self._brush_cursor_wy = -1
         
         # Set up widget
         self.setMouseTracking(True)
-        self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        self._cursor_over_canvas = False
+        self._default_cursor = QCursor(Qt.CursorShape.CrossCursor)
         self.update_size()
         
         # Connect signals
@@ -95,38 +103,27 @@ class Canvas(QWidget):
         """
         self.zoom_level = max(0.1, min(10.0, zoom_level))
         self.update_size()
+        self._update_cursor()
     
     def set_tool(self, tool: str):
-        """Set current drawing tool.
-        
-        Args:
-            tool: Tool name ("brush" or "eraser")
-        """
+        """Set current drawing tool."""
         self.current_tool = tool
+        self._update_cursor()
     
     def set_brush_size(self, size: int):
-        """Set brush size.
-        
-        Args:
-            size: Brush size in pixels
-        """
+        """Set brush size in pixels."""
         self.brush_size = max(1, min(200, size))
+        self._update_cursor()
     
     def set_brush_opacity(self, opacity: int):
-        """Set brush opacity.
-        
-        Args:
-            opacity: Opacity (0-100)
-        """
+        """Set brush opacity (0-100)."""
         self.brush_opacity = max(0, min(100, opacity))
+        self._update_cursor()
     
     def set_brush_color(self, color: QColor):
-        """Set brush color.
-        
-        Args:
-            color: QColor object
-        """
+        """Set brush color."""
         self.brush_color = color
+        self._update_cursor()
     
     def set_paint_bucket_tolerance(self, tolerance: int):
         """Set paint bucket color tolerance (0-255)."""
@@ -141,6 +138,10 @@ class Canvas(QWidget):
         """Set shape style: filled, outline, transparent_fill, transparent_outline."""
         allowed = ("filled", "outline", "transparent_fill", "transparent_outline")
         self.shape_style = style if style in allowed else "filled"
+    
+    def set_shape_outline_width(self, width: int):
+        """Set outline/border thickness for shapes (1–50 pixels)."""
+        self.shape_outline_width = max(1, min(50, width))
     
     def set_eraser_color(self, color: QColor):
         """Set color the eraser paints with (e.g. white to 'erase' to paper)."""
@@ -207,7 +208,7 @@ class Canvas(QWidget):
                     Qt.TransformationMode.SmoothTransformation
                 )
             
-            # Draw the image
+            # Draw the image (shape preview is the layer itself—we draw on the layer during drag)
             painter.drawPixmap(0, 0, pixmap)
             
             # Eyedropper zoom bubble: zoomed pixel view next to cursor
@@ -216,6 +217,79 @@ class Canvas(QWidget):
             
         except Exception as e:
             print(f"Error rendering canvas: {e}")
+    
+    def _make_tool_cursor(self) -> QCursor:
+        """Build a cursor that shows the current tool (brush circle + color, bucket + color, etc.). Only used over canvas."""
+        size = 48
+        hot = size // 2
+        pix = QPixmap(size, size)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if self.current_tool == "brush":
+            # Circle with brush diameter (scaled to fit) and color
+            r_canvas = max(1, self.brush_size / 2.0)
+            r_screen = min(hot - 2, r_canvas * self.zoom_level)
+            r_screen = max(2, min(hot - 2, int(r_screen)))
+            alpha = int(255 * self.brush_opacity / 100)
+            c = QColor(self.brush_color.red(), self.brush_color.green(), self.brush_color.blue(), alpha)
+            p.setBrush(QBrush(c))
+            p.setPen(QPen(QColor(60, 60, 60), 1))
+            p.drawEllipse(hot - r_screen, hot - r_screen, 2 * r_screen, 2 * r_screen)
+        elif self.current_tool == "eraser":
+            r_screen = min(hot - 2, max(2, int((self.brush_size / 2.0) * self.zoom_level)))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.setPen(QPen(QColor(200, 100, 100), 2))
+            p.drawEllipse(hot - r_screen, hot - r_screen, 2 * r_screen, 2 * r_screen)
+        elif self.current_tool == "transparency":
+            r_screen = min(hot - 2, max(2, int((self.brush_size / 2.0) * self.zoom_level)))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.setPen(QPen(QColor(120, 120, 255), 2))
+            p.drawEllipse(hot - r_screen, hot - r_screen, 2 * r_screen, 2 * r_screen)
+        elif self.current_tool == "paint_bucket":
+            # Aim dot at center (hotspot); bucket icon off to the side (top-left)
+            p.setBrush(QBrush(QColor(255, 255, 255)))
+            p.setPen(QPen(QColor(40, 40, 40), 1))
+            p.drawEllipse(hot - 2, hot - 2, 4, 4)
+            p.setPen(QPen(QColor(220, 220, 220), 2))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            # Bucket shape offset to top-left so dot stays at center
+            ox, oy = -14, -12
+            p.drawLine(hot + ox - 4, hot + oy + 4, hot + ox + 4, hot + oy + 4)
+            p.drawLine(hot + ox + 4, hot + oy + 4, hot + ox + 2, hot + oy - 4)
+            p.drawLine(hot + ox + 2, hot + oy - 4, hot + ox - 2, hot + oy - 2)
+            p.drawLine(hot + ox - 2, hot + oy - 2, hot + ox - 4, hot + oy + 4)
+            p.drawLine(hot + ox + 2, hot + oy - 4, hot + ox + 4, hot + oy - 2)
+            c = QColor(self.brush_color.red(), self.brush_color.green(), self.brush_color.blue())
+            p.fillRect(hot + ox - 3, hot + oy + 6, 6, 3, c)
+            p.setPen(QPen(QColor(80, 80, 80), 1))
+            p.drawRect(hot + ox - 3, hot + oy + 6, 6, 3)
+        elif self.current_tool == "shape":
+            p.setPen(QPen(QColor(220, 220, 220), 2))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.drawLine(hot - 8, hot, hot + 8, hot)
+            p.drawLine(hot, hot - 8, hot, hot + 8)
+        else:
+            # eyedropper / default: cross
+            p.setPen(QPen(QColor(220, 220, 220), 2))
+            p.setBrush(QBrush(Qt.GlobalColor.transparent))
+            p.drawLine(hot - 8, hot, hot + 8, hot)
+            p.drawLine(hot, hot - 8, hot, hot + 8)
+        p.end()
+        return QCursor(pix, hot, hot)
+    
+    def _update_cursor(self):
+        """Set cursor to tool cursor when over canvas, else default."""
+        if self._cursor_over_canvas:
+            self.setCursor(self._make_tool_cursor())
+        else:
+            self.setCursor(self._default_cursor)
+    
+    def enterEvent(self, event):
+        self._cursor_over_canvas = True
+        self._update_cursor()
+        super().enterEvent(event)
     
     def _draw_eyedropper_bubble(self, painter: QPainter, rendered_image: Image.Image, canvas_w: int, canvas_h: int):
         """Draw a zoom bubble next to the cursor showing pixels for precise eyedropper picking."""
@@ -311,12 +385,15 @@ class Canvas(QWidget):
             if active_layer:
                 self.image_before_draw = active_layer.image.copy()
                 self.shape_start_point = pt
+                self._shape_preview_end = pt
                 self.is_drawing = True
             return
         
         active_layer = self.project.get_layer(self.active_layer_index)
         if active_layer:
             self.image_before_draw = active_layer.image.copy()
+            if self.current_tool == "eraser":
+                self._eraser_composite_below = self.project.render_below(self.active_layer_index)
             self.is_drawing = True
             self.last_point = pt
             # Draw a dot on press so a single click (no drag) still draws
@@ -331,9 +408,22 @@ class Canvas(QWidget):
         if self.current_tool == "eyedropper":
             self._picker_cursor_wx = int(pt_widget.x())
             self._picker_cursor_wy = int(pt_widget.y())
+            self._brush_cursor_wx = -1
+            self._brush_cursor_wy = -1
             self.update()
+        else:
+            self._brush_cursor_wx = -1
+            self._brush_cursor_wy = -1
+            if self.current_tool == "shape":
+                self.update()
         
         if self.is_drawing and self.shape_start_point and self.current_tool == "shape":
+            self._shape_preview_end = pt
+            active_layer = self.project.get_layer(self.active_layer_index)
+            if active_layer and self.image_before_draw is not None:
+                active_layer.image = self.image_before_draw.copy()
+                self._draw_shape(active_layer, self.shape_start_point, pt)
+                self.project.layer_modified.emit(self.active_layer_index)
             self.update()
             return
         if self.is_drawing and self.last_point:
@@ -344,10 +434,14 @@ class Canvas(QWidget):
                 self.update()
     
     def leaveEvent(self, event):
-        """Clear cursor position when leaving canvas."""
+        """Clear cursor position when leaving canvas; restore default cursor."""
         self.cursor_position_changed.emit(-1, -1)
         self._picker_cursor_wx = -1
         self._picker_cursor_wy = -1
+        self._brush_cursor_wx = -1
+        self._brush_cursor_wy = -1
+        self._cursor_over_canvas = False
+        self.setCursor(self._default_cursor)
         if self.current_tool == "eyedropper":
             self.update()
     
@@ -357,25 +451,31 @@ class Canvas(QWidget):
             if self.is_drawing:
                 self.is_drawing = False
                 self.shape_start_point = None
+                self._shape_preview_end = None
                 self.last_point = None
                 active_layer = self.project.get_layer(self.active_layer_index)
                 if active_layer and self.image_before_draw:
                     active_layer.image = self.image_before_draw.copy()
                     self.project.layer_modified.emit(self.active_layer_index)
                 self.image_before_draw = None
+                self._eraser_composite_below = None
             return
         if not self.is_drawing:
             return
         pt = self._get_canvas_point(event.position().toPoint())
         active_layer = self.project.get_layer(self.active_layer_index)
         if self.shape_start_point and active_layer and self.image_before_draw and self.current_tool == "shape":
-            self._draw_shape(active_layer, self.shape_start_point, pt)
+            # Preview was the layer itself; commit using last drag point so no shift
+            end_pt = self._shape_preview_end if self._shape_preview_end is not None else pt
+            active_layer.image = self.image_before_draw.copy()
+            self._draw_shape(active_layer, self.shape_start_point, end_pt)
             self.drawing_completed.emit(
                 self.image_before_draw,
                 active_layer.image.copy(),
                 self.active_layer_index
             )
             self.shape_start_point = None
+            self._shape_preview_end = None
         elif active_layer and self.image_before_draw:
             self.drawing_completed.emit(
                 self.image_before_draw,
@@ -384,6 +484,7 @@ class Canvas(QWidget):
             )
         self.is_drawing = False
         self.image_before_draw = None
+        self._eraser_composite_below = None
         self.last_point = None
     
     def _draw_shape(self, layer, start: QPoint, end: QPoint):
@@ -397,7 +498,8 @@ class Canvas(QWidget):
             alpha,
         )
         transparent = (0, 0, 0, 0)
-        width = max(1, self.brush_size)
+        line_width = max(1, self.brush_size)  # used for line tool only
+        outline_width = max(1, min(50, self.shape_outline_width))  # border thickness for shapes
         style = self.shape_style
         use_fill = style in ("filled", "transparent_fill")
         use_outline = style in ("outline", "transparent_outline")
@@ -412,27 +514,27 @@ class Canvas(QWidget):
         h = box[3] - box[1]
         if self.shape_kind == "line":
             line_color = transparent if style == "transparent_outline" else color
-            draw.line([x1, y1, x2, y2], fill=line_color, width=width)
+            draw.line([x1, y1, x2, y2], fill=line_color, width=line_width)
         elif self.shape_kind == "rectangle":
             if use_outline:
-                draw.rectangle(box, fill=None, outline=outline_color, width=width)
+                draw.rectangle(box, fill=None, outline=outline_color, width=outline_width)
             if use_fill:
                 draw.rectangle(box, fill=fill_color)
         elif self.shape_kind == "ellipse":
             if use_outline:
-                draw.ellipse(box, fill=None, outline=outline_color, width=width)
+                draw.ellipse(box, fill=None, outline=outline_color, width=outline_width)
             if use_fill:
                 draw.ellipse(box, fill=fill_color)
         elif self.shape_kind == "rounded_rect":
             radius = min(w, h) // 4 if (w and h) else 0
             if hasattr(draw, "rounded_rectangle"):
                 if use_outline:
-                    draw.rounded_rectangle(box, radius=radius, fill=None, outline=outline_color, width=width)
+                    draw.rounded_rectangle(box, radius=radius, fill=None, outline=outline_color, width=outline_width)
                 if use_fill:
                     draw.rounded_rectangle(box, radius=radius, fill=fill_color)
             else:
                 if use_outline:
-                    draw.rectangle(box, fill=None, outline=outline_color, width=width)
+                    draw.rectangle(box, fill=None, outline=outline_color, width=outline_width)
                 if use_fill:
                     draw.rectangle(box, fill=fill_color)
         else:
@@ -454,24 +556,15 @@ class Canvas(QWidget):
     def _draw_line(self, layer, start: QPoint, end: QPoint):
         """Draw a line on the layer.
         
-        Args:
-            layer: Layer to draw on
-            start: Start point
-            end: End point
+        Eraser: replace pixels with the composite of layers below (removes paint, no transparency).
+        Other tools: draw with brush/transparent color.
         """
-        # Create ImageDraw object
+        if self.current_tool == "eraser" and self._eraser_composite_below is not None:
+            self._draw_eraser_stroke(layer, start, end)
+            return
         draw = ImageDraw.Draw(layer.image, 'RGBA')
-        
-        # Prepare color based on tool
         alpha = int(255 * self.brush_opacity / 100)
-        if self.current_tool == "eraser":
-            color = (
-                self.eraser_color.red(),
-                self.eraser_color.green(),
-                self.eraser_color.blue(),
-                alpha,
-            )
-        elif self.current_tool == "transparency":
+        if self.current_tool == "transparency":
             color = (0, 0, 0, 0)
         else:
             color = (
@@ -480,15 +573,11 @@ class Canvas(QWidget):
                 self.brush_color.blue(),
                 alpha,
             )
-        
-        # Draw line
         draw.line(
             [start.x(), start.y(), end.x(), end.y()],
             fill=color,
             width=self.brush_size
         )
-        
-        # Draw circle at end point for smoother strokes
         radius = self.brush_size // 2
         draw.ellipse(
             [
@@ -499,6 +588,45 @@ class Canvas(QWidget):
             ],
             fill=color
         )
+    
+    def _draw_eraser_stroke(self, layer, start: QPoint, end: QPoint):
+        """Eraser: replace stroke pixels with composite of layers below (opaque, no transparency)."""
+        w, h = layer.image.size
+        mask = Image.new('L', (w, h), 0)
+        mdraw = ImageDraw.Draw(mask)
+        mdraw.line(
+            [start.x(), start.y(), end.x(), end.y()],
+            fill=255,
+            width=self.brush_size
+        )
+        radius = self.brush_size // 2
+        mdraw.ellipse(
+            [
+                end.x() - radius,
+                end.y() - radius,
+                end.x() + radius,
+                end.y() + radius
+            ],
+            fill=255
+        )
+        mdraw.ellipse(
+            [
+                start.x() - radius,
+                start.y() - radius,
+                start.x() + radius,
+                start.y() + radius
+            ],
+            fill=255
+        )
+        layer_arr = np.array(layer.image, dtype=np.uint8)
+        below_arr = np.array(self._eraser_composite_below, dtype=np.uint8)
+        mask_arr = np.array(mask, dtype=np.uint8)
+        sel = mask_arr > 0
+        layer_arr[sel, 0] = below_arr[sel, 0]
+        layer_arr[sel, 1] = below_arr[sel, 1]
+        layer_arr[sel, 2] = below_arr[sel, 2]
+        layer_arr[sel, 3] = 255
+        layer.image = Image.fromarray(layer_arr)
     
     def _flood_fill(self, image: Image.Image, x: int, y: int) -> Image.Image | None:
         """Fill contiguous area at (x,y) with brush color. Returns new image or None."""

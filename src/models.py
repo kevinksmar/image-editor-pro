@@ -306,6 +306,35 @@ class Project(QObject):
         
         return result
     
+    def render_below(self, layer_index: int) -> Image.Image:
+        """Render the composite of all layers below the given index (what would show through).
+        
+        Used by the eraser to "remove paint" by replacing pixels with the color that would
+        be visible if the current layer were transparent at that point. Uses white as the
+        canvas background so erasing never becomes black.
+        
+        Args:
+            layer_index: Current layer index; layers 0..layer_index-1 are composited.
+            
+        Returns:
+            PIL RGBA image of the same size as the project.
+        """
+        # White background so transparent areas and "nothing below" restore to white, not black
+        result = Image.new('RGBA', (self.width, self.height), (255, 255, 255, 255))
+        for i in range(0, layer_index):
+            layer = self.layers[i]
+            if not layer.visible:
+                continue
+            if layer.opacity < 100:
+                layer_img = layer.image.copy()
+                alpha = layer_img.split()[3]
+                alpha = alpha.point(lambda p: int(p * layer.opacity / 100))
+                layer_img.putalpha(alpha)
+            else:
+                layer_img = layer.image
+            result = Image.alpha_composite(result, layer_img)
+        return result
+    
     def to_dict(self) -> dict:
         """Serialize project to dictionary for saving.
         

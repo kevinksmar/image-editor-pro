@@ -70,6 +70,10 @@ QToolBar {
     spacing: 6px;
     padding: 6px;
 }
+QToolBar QToolButton {
+    color: #e5e5e7;
+    background-color: transparent;
+}
 QToolBar::separator {
     width: 1px;
     background-color: #3d3d42;
@@ -251,6 +255,13 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 10px;
     padding: 0 6px;
+    color: #6e6e73;
+}
+/* Tool panel: keep button icons visible (don't tint with text color) */
+QGroupBox QPushButton {
+    color: #e5e5e7;
+}
+QGroupBox QPushButton:disabled {
     color: #6e6e73;
 }
 

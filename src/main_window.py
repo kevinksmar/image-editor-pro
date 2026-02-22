@@ -520,6 +520,11 @@ class MainWindow(QMainWindow):
         add_layer_action.triggered.connect(self.add_layer)
         layer_menu.addAction(add_layer_action)
         
+        add_image_action = QAction("Add Image from &File...", self)
+        add_image_action.setToolTip("Import an image file as a new layer")
+        add_image_action.triggered.connect(self.add_image_from_file)
+        layer_menu.addAction(add_image_action)
+        
         duplicate_layer_action = QAction("&Duplicate Layer", self)
         duplicate_layer_action.setShortcut(QKeySequence("Ctrl+J"))
         duplicate_layer_action.triggered.connect(self.duplicate_layer)
@@ -800,7 +805,9 @@ class MainWindow(QMainWindow):
         """Set up toolbar (icons with tooltips for compact layout)."""
         toolbar = QToolBar("Main Toolbar")
         toolbar.setObjectName("MainToolbar")
-        toolbar.setMovable(False)
+        toolbar.setMovable(True)
+        toolbar.setFloatable(True)
+        toolbar.setMaximumHeight(48)
         self.addToolBar(toolbar)
         style = self.style()
         
@@ -844,6 +851,7 @@ class MainWindow(QMainWindow):
         self.layer_dock.setObjectName("LayersDock")
         self.layer_dock.setWidget(self.layer_panel)
         self.layer_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.layer_dock.setMaximumWidth(500)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.layer_dock)
         
         # Tool options panel
@@ -852,6 +860,7 @@ class MainWindow(QMainWindow):
         self.tool_dock.setObjectName("ToolsDock")
         self.tool_dock.setWidget(self.tool_panel)
         self.tool_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.tool_dock.setMaximumWidth(500)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.tool_dock)
         
         # History panel
@@ -923,6 +932,7 @@ class MainWindow(QMainWindow):
         self.tool_panel.paint_bucket_tolerance_changed.connect(self.canvas.set_paint_bucket_tolerance)
         self.tool_panel.shape_kind_changed.connect(self.canvas.set_shape_kind)
         self.tool_panel.shape_style_changed.connect(self.canvas.set_shape_style)
+        self.tool_panel.shape_outline_width_changed.connect(self.canvas.set_shape_outline_width)
         self.tool_panel.eraser_color_changed.connect(self.canvas.set_eraser_color)
         
         # Canvas signals
@@ -1029,21 +1039,33 @@ class MainWindow(QMainWindow):
         default_bg = self.settings.value("default_background", "White")
         bg_index = 0 if default_bg == "White" else 1
         
-        width, ok = QInputDialog.getInt(self, "New Project", "Width:", default_w, 1, 10000)
-        if not ok:
+        # Single dialog for canvas size and background
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New image")
+        form = QFormLayout(dialog)
+        w_spin = QSpinBox()
+        w_spin.setRange(1, 10000)
+        w_spin.setValue(default_w)
+        w_spin.setSuffix(" px")
+        form.addRow("Canvas width:", w_spin)
+        h_spin = QSpinBox()
+        h_spin.setRange(1, 10000)
+        h_spin.setValue(default_h)
+        h_spin.setSuffix(" px")
+        form.addRow("Canvas height:", h_spin)
+        bg_combo = QComboBox()
+        bg_combo.addItems(["White", "Transparent"])
+        bg_combo.setCurrentIndex(bg_index)
+        form.addRow("Background:", bg_combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        
-        height, ok = QInputDialog.getInt(self, "New Project", "Height:", default_h, 1, 10000)
-        if not ok:
-            return
-        
-        background, ok = QInputDialog.getItem(
-            self, "New Project", "Background:",
-            ["White", "Transparent"], bg_index, False
-        )
-        if not ok:
-            return
-        initial_white = background == "White"
+        width = w_spin.value()
+        height = h_spin.value()
+        initial_white = bg_combo.currentText() == "White"
         
         # Create new project
         self.project = Project(width, height, initial_background_white=initial_white)
@@ -1359,6 +1381,31 @@ class MainWindow(QMainWindow):
             command = AddLayerCommand(self.project, name)
             self.command_history.execute(command)
             self.modified = True
+    
+    def add_image_from_file(self):
+        """Import an image file as a new layer (resized to fit canvas)."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Add Image as Layer",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)"
+        )
+        if not file_path:
+            return
+        try:
+            img = Image.open(file_path)
+            img.load()
+            img_rgba = img.convert("RGBA")
+            pw, ph = self.project.width, self.project.height
+            iw, ih = img_rgba.size
+            if (iw, ih) != (pw, ph):
+                img_rgba = img_rgba.resize((pw, ph), Image.Resampling.LANCZOS)
+            name = os.path.splitext(os.path.basename(file_path))[0]
+            self.project.add_layer(name or "Image", image=img_rgba)
+            self.layer_panel.refresh_layers()
+            self.modified = True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not load image: {str(e)}")
     
     def remove_layer(self, layer_index: int):
         """Remove a layer.
